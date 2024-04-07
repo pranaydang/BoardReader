@@ -56,7 +56,17 @@ def preprocess_and_extract_letters(signboard_image):
 
     cropped_image_word = signboard_image[word_top_crop:h - word_bottom_crop, word_left_crop:w - word_right_crop]
 
-    return cropped_image_category, cropped_image_word
+    h1, w1 = cropped_image_category.shape
+    h2, w2 = cropped_image_word.shape
+
+    letter_width_category = int(w1 / 6)  # Calculate the width of each letter (category)
+    letter_width_word = int(w2 / 12)  # Calculate the width of each letter (word)
+
+    # Splitting the letters
+    letters_category = [cropped_image_category[:, i * letter_width_category: (i + 1) * letter_width_category] for i in range(6)]
+    letters_word = [cropped_image_word[:, i * letter_width_word: (i + 1) * letter_width_word] for i in range(12)]
+
+    return letters_category, letters_word
 
 
 # Initialize the ROS node
@@ -86,14 +96,14 @@ def image_callback(ros_image):
 
     if signboard_image is not None:
         # Preprocess the signboard image and extract letters
-        cropped_image_category, cropped_image_word = preprocess_and_extract_letters(signboard_image)
+        letters_category, letters_word = preprocess_and_extract_letters(signboard_image)
 
         # Use the CNN model to predict letters
         # Here you would predict with your CNN model and format the output into a string clue_prediction
 
-        predicted_labels_category = cnn_model(cropped_image_category)
+        predicted_labels_category = cnn_model.predict(letters_category)
 
-        predicted_labels_word = cnn_model(cropped_image_word)
+        predicted_labels_word = cnn_model.predict(letters_word)
 
         category = ""
         word = ""
@@ -130,7 +140,7 @@ def image_callback(ros_image):
 
         # Use a for loop with enumerate to find the index
         for index, string in enumerate(categories):
-            if string == category:
+            if string[0] == category[0]:
                 location = index+1
                 break  # Exit the loop once the string is found
 
@@ -138,8 +148,8 @@ def image_callback(ros_image):
         team_id = "1White3Brown"       # Replace with your actual team ID
         team_password = "YourPass"   # Replace with your actual team password
         clue_location = location           # Replace with the actual location of the clue
-        #clue_prediction = "PREDICTED_CLUE"  # Replace with the actual predicted clue from the model
-        message_data = f"{team_id},{team_password},{clue_location},{word}"
+        clue_prediction = word # Replace with the actual predicted clue from the model
+        message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
         message = String(data=message_data)
         score_publisher.publish(message)
 
