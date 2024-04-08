@@ -108,7 +108,7 @@ bridge = CvBridge()
 score_publisher = rospy.Publisher('/score_tracker', String, queue_size=10)
 
 # Load the pre-trained CNN model
-cnn_model = load_model('path_to_your_saved_model.h5')
+cnn_model = load_model('https://github.com/pranaydang/BoardReader/blob/main/cnn_model.keras')
 
 # Assuming label_dict maps characters to indices
 
