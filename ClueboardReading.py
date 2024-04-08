@@ -26,8 +26,6 @@ class ClueboardDetector:
             contours = sorted(contours, key=cv2.contourArea, reverse=True)
             outer_contour = contours[0]  # The first contour will be the largest
             x, y, w, h = cv2.boundingRect(outer_contour)
-            # Draw bounding rectangle around the outer contour
-            cv2.rectangle(cv_image, (x, y), (x + w, y + h), (0, 255, 0), 3)
             # Extract the signboard region from the image
             signboard = cv_image[y:y+h, x:x+w]
             return signboard
@@ -66,7 +64,39 @@ def preprocess_and_extract_letters(signboard_image):
     letters_category = [cropped_image_category[:, i * letter_width_category: (i + 1) * letter_width_category] for i in range(6)]
     letters_word = [cropped_image_word[:, i * letter_width_word: (i + 1) * letter_width_word] for i in range(12)]
 
-    return letters_category, letters_word
+    # Initialize lists to store preprocessed letter images
+    preprocessed_letters_category = []
+    preprocessed_letters_word = []
+
+    # Preprocess letters for 'category'
+    for letter_img in letters_category:
+        # Resize each letter image to match the model's input shape: (120, 45)
+        resized_img = cv2.resize(letter_img, (45, 120))
+        # Ensure it's a single channel (grayscale), though it should already be
+        if len(resized_img.shape) == 3:
+            resized_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
+        # Normalize pixel values to [0, 1] if your model expects that range
+        normalized_img = resized_img.astype('float32') / 255.0
+        # Add a channel dimension to match the input shape (120, 45, 1)
+        normalized_img = np.expand_dims(normalized_img, axis=-1)
+        # Append to the list
+        preprocessed_letters_category.append(normalized_img)
+
+    # Preprocess letters for 'word'
+    for letter_img in letters_word:
+        # Repeat the preprocessing steps as above for 'category'
+        resized_img = cv2.resize(letter_img, (45, 120))
+        if len(resized_img.shape) == 3:
+            resized_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
+        normalized_img = resized_img.astype('float32') / 255.0
+        normalized_img = np.expand_dims(normalized_img, axis=-1)
+        preprocessed_letters_word.append(normalized_img)
+
+    # Convert lists to numpy arrays
+    preprocessed_letters_category = np.array(preprocessed_letters_category)
+    preprocessed_letters_word = np.array(preprocessed_letters_word)
+
+    return preprocessed_letters_category, preprocessed_letters_word
 
 
 # Initialize the ROS node
@@ -96,14 +126,14 @@ def image_callback(ros_image):
 
     if signboard_image is not None:
         # Preprocess the signboard image and extract letters
-        letters_category, letters_word = preprocess_and_extract_letters(signboard_image)
+        preprocessed_letters_category, preprocessed_letters_word = preprocess_and_extract_letters(signboard_image)
 
         # Use the CNN model to predict letters
         # Here you would predict with your CNN model and format the output into a string clue_prediction
 
-        predicted_labels_category = cnn_model.predict(letters_category)
+        predicted_labels_category = cnn_model.predict(preprocessed_letters_category)
 
-        predicted_labels_word = cnn_model.predict(letters_word)
+        predicted_labels_word = cnn_model.predict(preprocessed_letters_word)
 
         category = ""
         word = ""
@@ -130,7 +160,7 @@ def image_callback(ros_image):
             
             word += predicted_labels_word[i]
 
-            if predicted_labels_word[i] == " ":
+            if predicted_labels_word[j] == " ":
                 count_blanks_word++
         
         categories = ["SIZE", "VICTIM", "CRIME", "TIME", "PLACE", "MOTIVE", "WEAPON", "BANDIT"]
