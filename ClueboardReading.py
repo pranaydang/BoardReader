@@ -5,6 +5,7 @@ from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from tensorflow.keras.models import load_model
+import string
 
 # Define the ClueboardDetector class
 class ClueboardDetector:
@@ -75,12 +76,11 @@ def preprocess_and_extract_letters(signboard_image):
         # Ensure it's a single channel (grayscale), though it should already be
         if len(resized_img.shape) == 3:
             resized_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
-        # Normalize pixel values to [0, 1] if your model expects that range
-        normalized_img = resized_img.astype('float32') / 255.0
+        
         # Add a channel dimension to match the input shape (120, 45, 1)
-        normalized_img = np.expand_dims(normalized_img, axis=-1)
+        resized_img = np.expand_dims(resized_img, axis=-1)
         # Append to the list
-        preprocessed_letters_category.append(normalized_img)
+        preprocessed_letters_category.append(resized_img)
 
     # Preprocess letters for 'word'
     for letter_img in letters_word:
@@ -88,9 +88,8 @@ def preprocess_and_extract_letters(signboard_image):
         resized_img = cv2.resize(letter_img, (45, 120))
         if len(resized_img.shape) == 3:
             resized_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2GRAY)
-        normalized_img = resized_img.astype('float32') / 255.0
-        normalized_img = np.expand_dims(normalized_img, axis=-1)
-        preprocessed_letters_word.append(normalized_img)
+        resized_img = np.expand_dims(resized_img, axis=-1)
+        preprocessed_letters_word.append(resized_img)
 
     # Convert lists to numpy arrays
     preprocessed_letters_category = np.array(preprocessed_letters_category)
@@ -110,6 +109,14 @@ score_publisher = rospy.Publisher('/score_tracker', String, queue_size=10)
 
 # Load the pre-trained CNN model
 cnn_model = load_model('path_to_your_saved_model.h5')
+
+# Assuming label_dict maps characters to indices
+
+characters = " " + string.ascii_uppercase + string.digits
+label_dict = {char: i for i, char in enumerate(characters)}
+
+# Create an inverse mapping
+index_to_char = {index: char for char, index in label_dict.items()}
 
 # Callback function for the image subscriber
 def image_callback(ros_image):
@@ -135,33 +142,13 @@ def image_callback(ros_image):
 
         predicted_labels_word = cnn_model.predict(preprocessed_letters_word)
 
-        category = ""
-        word = ""
+        # Assuming predicted_labels_category and predicted_labels_word contain model predictions
+        predicted_indices_category = np.argmax(predicted_labels_category, axis=1)
+        predicted_indices_word = np.argmax(predicted_labels_word, axis=1)
 
-        count_blanks_category = 0
-        count_blanks_word = 0
-        i = 0
-        j = 0
-
-        for i in range(6):
-            
-            if count_blanks_category == 2:
-                break
-            
-            category += predicted_labels_category[i]
-
-            if predicted_labels_category[i] == " ":
-                count_blanks_category++
-
-        for j in range(12):
-
-            if count_blanks_word == 2:
-                break
-            
-            word += predicted_labels_word[i]
-
-            if predicted_labels_word[j] == " ":
-                count_blanks_word++
+        # Decode the predictions to characters
+        decoded_category = ''.join(index_to_char[index] for index in predicted_indices_category)
+        decoded_word = ''.join(index_to_char[index] for index in predicted_indices_word)
         
         categories = ["SIZE", "VICTIM", "CRIME", "TIME", "PLACE", "MOTIVE", "WEAPON", "BANDIT"]
 
@@ -170,15 +157,15 @@ def image_callback(ros_image):
 
         # Use a for loop with enumerate to find the index
         for index, string in enumerate(categories):
-            if string[0] == category[0]:
+            if string[0] == decoded_category[0]:
                 location = index+1
                 break  # Exit the loop once the string is found
 
         # Construct the message with team information and prediction to send to the score tracker
-        team_id = "1White3Brown"       # Replace with your actual team ID
-        team_password = "YourPass"   # Replace with your actual team password
+        team_id = "1W3B"       # Replace with your actual team ID
+        team_password = "pword"   # Replace with your actual team password
         clue_location = location           # Replace with the actual location of the clue
-        clue_prediction = word # Replace with the actual predicted clue from the model
+        clue_prediction = decoded_word # Replace with the actual predicted clue from the model
         message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
         message = String(data=message_data)
         score_publisher.publish(message)
