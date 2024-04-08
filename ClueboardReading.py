@@ -31,15 +31,21 @@ class ClueboardDetector:
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         # Find the outermost contour
         if contours:
-            # Sort contours by area in descending order
-            contours = sorted(contours, key=cv2.contourArea, reverse=True)
-            outer_contour = contours[0]  # The first contour will be the largest
-            x, y, w, h = cv2.boundingRect(outer_contour)
-            # Extract the signboard region from the image
-            signboard = cv_image[y:y+h, x:x+w]
-            # Convert to grayscale
-            signboard = cv2.cvtColor(signboard, cv2.COLOR_BGR2GRAY)
-            return signboard
+            largest_contour = max(contours, key=cv2.contourArea)
+            epsilon = 0.1 * cv2.arcLength(largest_contour, True)
+            approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+
+            if len(approx) == 4:  # Ensure the contour has 4 points
+                # Assuming the detected contour approximates the corners of the signboard
+                pts1 = np.float32([approx[0][0], approx[1][0], approx[2][0], approx[3][0]])
+                # Define points for the desired output (signboard dimensions)
+                signboard_width, signboard_height = 600, 400  # Example dimensions
+                pts2 = np.float32([[0, 0], [signboard_width, 0], [signboard_width, signboard_height], [0, signboard_height]])
+                # Calculate the perspective transform matrix and apply it
+                matrix = cv2.getPerspectiveTransform(pts1, pts2)
+                signboard_transformed = cv2.warpPerspective(cv_image, matrix, (signboard_width, signboard_height))
+                return signboard_transformed
+            
         return None  # Return None if no signboard is detected
 
     def shutdown_hook(self):
