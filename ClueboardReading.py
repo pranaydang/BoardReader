@@ -21,14 +21,19 @@ class ClueboardDetector:
         self.index_to_char = {index: char for char, index in self.label_dict.items()}
 
     def detect_clueboard(self, cv_image):
-        # Convert image to grayscale
-        gray_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-        # Apply Gaussian blur to reduce noise
-        blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
-        # Perform Canny edge detection
-        edges = cv2.Canny(enhanced_image, 50, 150)
+        # Convert to HSV color space for easier color thresholding
+        hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+
+        # Based on the image, these bounds are adjusted for a darker blue
+        # The values might still need fine-tuning
+        lower_blue = np.array([100, 150, 50])  # Lower bound for dark blue
+        upper_blue = np.array([140, 255, 255]) # Upper bound for dark blue
+
+        # Create a mask with the new bounds
+        mask = cv2.inRange(hsv, lower_blue, upper_blue)
+        
         # Find contours in the edge-detected image
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         # Find the outermost contour
         if contours:
             largest_contour = max(contours, key=cv2.contourArea)
