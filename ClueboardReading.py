@@ -11,9 +11,9 @@ import string
 class ClueboardDetector:
     def __init__(self):
         self.bridge = CvBridge()
-        self.cnn_model = load_model('cnn_model.keras')
+        self.cnn_model = load_model('cnn_model.h5')
 
-        rospy.Subscriber('/R1/pi_camera/image_raw', Image, self.image_callback)
+        rospy.Subscriber('/R1/pi_camera/image_raw', Image, callback)
         self.score_publisher = rospy.Publisher('/score_tracker', String, queue_size=1)
 
         self.characters = " " + string.ascii_uppercase + string.digits
@@ -21,36 +21,56 @@ class ClueboardDetector:
         self.index_to_char = {index: char for char, index in self.label_dict.items()}
 
     def detect_clueboard(self, cv_image):
+        #cv2.imshow("CV IMAGE", cv_image)
         # Convert to HSV color space for easier color thresholding
         hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
         # Based on the image, these bounds are adjusted for a darker blue
         # The values might still need fine-tuning
-        lower_blue = np.array([100, 150, 50])  # Lower bound for dark blue
+        lower_blue = np.array([100, 125, 40])  # Lower bound for dark blue
         upper_blue = np.array([140, 255, 255]) # Upper bound for dark blue
 
         # Create a mask with the new bounds
         mask = cv2.inRange(hsv, lower_blue, upper_blue)
-        
+        #cv2.imshow("mask",mask)
+        #cv2.waitKey()
         # Find contours in the edge-detected image
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        #print(contours)
         # Find the outermost contour
-        if contours:
-            largest_contour = max(contours, key=cv2.contourArea)
-            epsilon = 0.1 * cv2.arcLength(largest_contour, True)
-            approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+        if len(contours)>0:
+            #print("len more than 0")
+            # Sort the contours by area in descending order (largest first)
+            sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
+            print(sorted_contours)
+            if len(sorted_contours)>1:
+                #print("more than 1 contour")
+                needed_contour = sorted_contours[1]
+                # cv2.drawContours(cv_image, sorted_contours, -1, (0,255,0), 3)
+                # cv2.imshow("Contour", cv_image)
+                # cv2.waitKey()
+                epsilon = 0.05 * cv2.arcLength(needed_contour, True)
+                approx = np.squeeze(cv2.approxPolyDP(needed_contour, epsilon, True))
+                approx = order_points(approx)
+                #print(approx)
 
-            if len(approx) == 4:  # Ensure the contour has 4 points
-                # Assuming the detected contour approximates the corners of the signboard
-                pts1 = np.float32([approx[0][0], approx[1][0], approx[2][0], approx[3][0]])
-                # Define points for the desired output (signboard dimensions)
-                signboard_width, signboard_height = 600, 400  # Example dimensions
-                pts2 = np.float32([[0, 0], [signboard_width, 0], [signboard_width, signboard_height], [0, signboard_height]])
-                # Calculate the perspective transform matrix and apply it
-                matrix = cv2.getPerspectiveTransform(pts1, pts2)
-                signboard_transformed = cv2.warpPerspective(cv_image, matrix, (signboard_width, signboard_height))
-                return signboard_transformed
-            
+                if len(approx) == 4:  # Ensure the contour has 4 points
+                    #print("counter is approx a rectangle")
+                    # Assuming the detected contour approximates the corners of the signboard
+                    #pts1 = np.float32([approx[0], approx[1], approx[2], approx[3]])
+                    pts1 = np.float32([approx[0], approx[1], approx[2], approx[3]])
+                    # Define points for the desired output (signboard dimensions)
+                    signboard_width, signboard_height = 600, 400  # Example dimensions
+                    pts2 = np.float32([[0, 0], [signboard_width, 0], [signboard_width, signboard_height], [0, signboard_height]])
+                    #print(pts2)
+                    # Calculate the perspective transform matrix and apply it
+                    matrix = cv2.getPerspectiveTransform(pts1, pts2)
+                    signboard_transformed = cv2.warpPerspective(cv_image, matrix, (signboard_width, signboard_height))
+                    #cv2.imshow('Signboard',signboard_transformed)
+                    #cv2.waitKey()
+                    #print("hi")
+                    return signboard_transformed
+        #print("oops")
         return None  # Return None if no signboard is detected
 
     def shutdown_hook(self):
@@ -65,6 +85,9 @@ class ClueboardDetector:
         laplacian = cv2.Laplacian(image, cv2.CV_64F)
         laplacian = np.uint8(np.absolute(laplacian))
         signboard_image = cv2.addWeighted(image, 1.5, laplacian, -0.5, 0)
+
+        #cv2.imshow("Signboard processed", signboard_image)
+        #cv2.waitKey()
         
         if len(signboard_image.shape) == 3:
             h, w, _ = signboard_image.shape  # For color images
@@ -78,6 +101,9 @@ class ClueboardDetector:
         category_left_crop = int(0.42 * w)  # Calculate the number of columns to crop from the left
 
         cropped_image_category = signboard_image[category_top_crop:h - category_bottom_crop, category_left_crop:w - category_right_crop]
+
+        # cv2.imshow("category image", cropped_image_category)
+        # cv2.waitKey()
 
         word_top_crop = int(0.55 * h)  # Calculate the number of rows to crop from the top
         word_bottom_crop = int(0.15 * h)  # Calculate the number of rows to crop from the bottom
@@ -127,55 +153,94 @@ class ClueboardDetector:
         preprocessed_letters_category = np.array(preprocessed_letters_category)
         preprocessed_letters_word = np.array(preprocessed_letters_word)
 
+        print(preprocessed_letters_category)
+        print(preprocessed_letters_word)
+
         return preprocessed_letters_category, preprocessed_letters_word
 
-    # Callback function for the image subscriber
-    def image_callback(self, ros_image):
-        try:
-            # Convert the ROS image to an OpenCV image
-            cv_image = self.bridge.imgmsg_to_cv2(ros_image, "bgr8")
-        except CvBridgeError as e:
-            rospy.logerr(e)
-            return
 
-        # Instantiate the ClueboardDetector and detect the signboard in the image
-        signboard_image = self.detect_clueboard(cv_image)
+# Callback function for the image subscriber
+def callback(ros_image):
+    try:
+        # Convert the ROS image to an OpenCV image
+        cv_image = detect.bridge.imgmsg_to_cv2(ros_image, desired_encoding = "bgr8")
+    except CvBridgeError as e:
+        rospy.logerr(e)
+        return
 
-        if signboard_image is not None:
-            # Preprocess the signboard image and extract letters
-            preprocessed_letters_category, preprocessed_letters_word = self.preprocess_and_extract_letters(signboard_image)
+    # Instantiate the ClueboardDetector and detect the signboard in the image
+    # cv2.imshow('CV IMAGE', cv_image) 
+    # cv2.waitKey()
+    # print(cv_image)
+    signboard_image = detect.detect_clueboard(cv_image)
 
-            # Use the CNN model to predict letters
-            predicted_labels_category = self.cnn_model.predict(preprocessed_letters_category)
-            predicted_labels_word = self.cnn_model.predict(preprocessed_letters_word)
+    #cv2.imshow("signboard", signboard_image)
+    #cv2.waitKey()
 
-            # Assuming predicted_labels_category and predicted_labels_word contain model predictions
-            predicted_indices_category = np.argmax(predicted_labels_category, axis=1)
-            predicted_indices_word = np.argmax(predicted_labels_word, axis=1)
+    if signboard_image is not None:
+        #Preprocess the signboard image and extract letters
+        preprocessed_letters_category, preprocessed_letters_word = detect.preprocess_and_extract_letters(signboard_image)
 
-            # Decode the predictions to characters
-            decoded_category = ''.join(self.index_to_char[index] for index in predicted_indices_category)
-            decoded_word = ''.join(self.index_to_char[index] for index in predicted_indices_word)
-            
-            categories = ["SIZE", "VICTIM", "CRIME", "TIME", "PLACE", "MOTIVE", "WEAPON", "BANDIT"]
+        #for i , letter_image in enumerate(preprocessed_letters_category):
+        #     cv2.imshow(f'Letter category[i]', letter_image)
+        #     cv2.waitKey(0)
+        
+        # for i , letter_image in enumerate(preprocessed_letters_word):
+        #     cv2.imshow(f'Letter Word[i]', letter_image)
+        #     cv2.waitKey(0)
 
-            # Initialize a variable to store the found index
-            location = None
+        # Use the CNN model to predict letters
+        predicted_labels_category = detect.cnn_model.predict(preprocessed_letters_category)
+        predicted_labels_word = detect.cnn_model.predict(preprocessed_letters_word)
 
-            # Use a for loop with enumerate to find the index
-            for index, string in enumerate(categories):
-                if string[0] == decoded_category[0]:
+        # Assuming predicted_labels_category and predicted_labels_word contain model predictions
+        predicted_indices_category = np.argmax(predicted_labels_category, axis=1)
+        predicted_indices_word = np.argmax(predicted_labels_word, axis=1)
+
+        # Decode the predictions to characters
+        decoded_category = ''.join(detect.index_to_char[index] for index in predicted_indices_category)
+        decoded_word = ''.join(detect.index_to_char[index] for index in predicted_indices_word)
+        
+        categories = ["SIZE", "VICTIM", "CRIME", "TIME", "PLACE", "MOTIVE", "WEAPON", "BANDIT"]
+
+        # Initialize a variable to store the found index
+        location = None
+
+        # Use a for loop with enumerate to find the index
+        for index, string in enumerate(categories):
+            if string[0] == decoded_category[0]:
+                if string[1] == decoded_category[1]:
                     location = index+1
                     break  # Exit the loop once the string is found
 
-            # Construct the message with team information and prediction to send to the score tracker
-            team_id = "1W3B"
-            team_password = "pword"
-            clue_location = location
-            clue_prediction = decoded_word
-            message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
-            message = String(data=message_data)
-            self.score_publisher.publish(message)
+        print(location)
+
+        # Construct the message with team information and prediction to send to the score tracker
+        team_id = "1W3B"
+        team_password = "pword"
+        clue_location = location
+        clue_prediction = decoded_word
+        message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
+        message = String(data=message_data)
+        detect.score_publisher.publish(message)
+
+def order_points(pts):
+    #Calculate the sum and difference of the points' coordinates
+    sum_pts = pts.sum(axis=1)
+    diff_pts = np.diff(pts, axis=1)
+
+     #The bottom-left point will have the smallest sum, whereas
+     # the top-right point will have the largest sum
+    top_left = pts[np.argmin(sum_pts)]
+    bottom_right = pts[np.argmax(sum_pts)]
+
+     # The top-left point will have the smallest difference,
+     # whereas the bottom-right point will have the largest difference
+    top_right = pts[np.argmin(diff_pts)]
+    bottom_left = pts[np.argmax(diff_pts)]
+
+     # Return the coordinates in the order: top-left, top-right, bottom-right, bottom-left
+    return np.array([top_left, top_right, bottom_right, bottom_left], dtype="float32")
 
 if __name__ == '__main__':
 
@@ -189,3 +254,4 @@ if __name__ == '__main__':
         rospy.spin()
     except KeyboardInterrupt:
         rospy.loginfo("Shutting down ClueboardDetector node.")
+        cv2.destroyAllWindows()
