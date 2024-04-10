@@ -28,38 +28,56 @@ class ClueboardDetector:
         self.index_to_char = {index: char for char, index in self.label_dict.items()}
 
     def detect_clueboard(self, cv_image):
+        #cv2.imshow("CV IMAGE", cv_image)
         # Convert to HSV color space for easier color thresholding
         hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
+        # Based on the image, these bounds are adjusted for a darker blue
+        # The values might still need fine-tuning
         lower_blue = np.array([100, 125, 40])  # Lower bound for dark blue
         upper_blue = np.array([140, 255, 255]) # Upper bound for dark blue
 
+        # Create a mask with the new bounds
         mask = cv2.inRange(hsv, lower_blue, upper_blue)
-    
+        #cv2.imshow("mask",mask)
+        #cv2.waitKey()
         # Find contours in the edge-detected image
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Find the second outermost contour
-        if len(contours)>0
+        #print(contours)
+        # Find the outermost contour
+        if len(contours)>0:
+            #print("len more than 0")
             # Sort the contours by area in descending order (largest first)
             sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
-            
+            #print(sorted_contours)
             if len(sorted_contours)>1:
+                #print("more than 1 contour")
                 needed_contour = sorted_contours[1]
+                # cv2.drawContours(cv_image, sorted_contours, -1, (0,255,0), 3)
+                # cv2.imshow("Contour", cv_image)
+                # cv2.waitKey()
                 epsilon = 0.05 * cv2.arcLength(needed_contour, True)
                 approx = np.squeeze(cv2.approxPolyDP(needed_contour, epsilon, True))
                 approx = order_points(approx)
+                #print(approx)
 
                 if len(approx) == 4:  # Ensure the contour has 4 points
+                    #print("counter is approx a rectangle")
                     # Assuming the detected contour approximates the corners of the signboard
+                    #pts1 = np.float32([approx[0], approx[1], approx[2], approx[3]])
                     pts1 = np.float32([approx[0], approx[1], approx[2], approx[3]])
                     # Define points for the desired output (signboard dimensions)
-                    signboard_width, signboard_height = 600, 400 
+                    signboard_width, signboard_height = 600, 400  # Example dimensions
                     pts2 = np.float32([[0, 0], [signboard_width, 0], [signboard_width, signboard_height], [0, signboard_height]])
+                    #print(pts2)
                     # Calculate the perspective transform matrix and apply it
                     matrix = cv2.getPerspectiveTransform(pts1, pts2)
                     signboard_transformed = cv2.warpPerspective(cv_image, matrix, (signboard_width, signboard_height))
+                    #cv2.imshow('Signboard',signboard_transformed)
+                    #cv2.waitKey()
+                    #print("hi")
                     return signboard_transformed
+        #print("oops")
         return None  # Return None if no signboard is detected
 
     def shutdown_hook(self):
@@ -74,6 +92,9 @@ class ClueboardDetector:
         laplacian = cv2.Laplacian(image, cv2.CV_64F)
         laplacian = np.uint8(np.absolute(laplacian))
         signboard_image = cv2.addWeighted(image, 1.5, laplacian, -0.5, 0)
+
+        #cv2.imshow("Signboard processed", signboard_image)
+        #cv2.waitKey()
         
         if len(signboard_image.shape) == 3:
             h, w, _ = signboard_image.shape  # For color images
@@ -87,6 +108,9 @@ class ClueboardDetector:
         category_left_crop = int(0.42 * w)  # Calculate the number of columns to crop from the left
 
         cropped_image_category = signboard_image[category_top_crop:h - category_bottom_crop, category_left_crop:w - category_right_crop]
+
+        #cv2.imshow("category image", cropped_image_category)
+        #cv2.waitKey()
 
         word_top_crop = int(0.55 * h)  # Calculate the number of rows to crop from the top
         word_bottom_crop = int(0.15 * h)  # Calculate the number of rows to crop from the bottom
@@ -105,6 +129,12 @@ class ClueboardDetector:
         # Splitting the letters
         letters_category = [cropped_image_category[:, i * letter_width_category: (i + 1) * letter_width_category] for i in range(6)]
         letters_word = [cropped_image_word[:, i * letter_width_word: (i + 1) * letter_width_word] for i in range(12)]
+
+        # cv2.imshow("letters0",letters_category[0])
+        # cv2.waitKey()
+
+        # cv2.imshow("letters1",letters_category[1])
+        # cv2.waitKey()
 
         # Initialize lists to store preprocessed letter images
         preprocessed_letters_category = []
@@ -128,10 +158,17 @@ class ClueboardDetector:
         preprocessed_letters_category = np.array(preprocessed_letters_category)
         preprocessed_letters_word = np.array(preprocessed_letters_word)
 
+        #print(preprocessed_letters_category)
+        #print(preprocessed_letters_word)
+
         return preprocessed_letters_category, preprocessed_letters_word
 
     def run_tflite_model(self, input_data):
+        #print("Input data shape pre:", input_data.shape)
+        #input_data = np.expand_dims(input_data, axis=0)
         input_data = np.expand_dims(input_data, axis=-1)
+        #print("Input data shape:", input_data.shape)
+        #print("Expected input shape:", self.input_details[0]['shape'])
         self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
         self.interpreter.invoke()
         output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
@@ -147,11 +184,26 @@ def callback(ros_image):
         rospy.logerr(e)
         return
 
+    # Instantiate the ClueboardDetector and detect the signboard in the image
+    # cv2.imshow('CV IMAGE', cv_image) 
+    # cv2.waitKey()
+    # print(cv_image)
     signboard_image = detect.detect_clueboard(cv_image)
+
+    #cv2.imshow("signboard", signboard_image)
+    #cv2.waitKey()
 
     if signboard_image is not None:
         #Preprocess the signboard image and extract letters
         preprocessed_letters_category, preprocessed_letters_word = detect.preprocess_and_extract_letters(signboard_image)
+
+        #for i , letter_image in enumerate(preprocessed_letters_category):
+        #     cv2.imshow(f'Letter category[i]', letter_image)
+        #     cv2.waitKey(0)
+        
+        # for i , letter_image in enumerate(preprocessed_letters_word):
+        #     cv2.imshow(f'Letter Word[i]', letter_image)
+        #     cv2.waitKey(0)
 
         # Use the CNN model to predict letters
         predicted_labels_category = []
@@ -169,6 +221,8 @@ def callback(ros_image):
         predicted_indices_category = [np.argmax(letter) for letter in predicted_labels_category]
         predicted_indices_word = [np.argmax(letter) for letter in predicted_labels_word]
 
+        print(predicted_indices_category)
+
         # Decode the predictions to characters
         decoded_category = ''.join(detect.index_to_char[index] for index in predicted_indices_category)
 
@@ -185,6 +239,8 @@ def callback(ros_image):
                 if string[1] == decoded_category[1]:
                     location = index+1
                     break  # Exit the loop once the string is found
+
+        #print(location)
 
         # Construct the message with team information and prediction to send to the score tracker
         team_id = "1W3B"
