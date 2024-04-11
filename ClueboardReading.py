@@ -243,13 +243,15 @@ def callback(ros_image):
         #print(location)
 
         # Construct the message with team information and prediction to send to the score tracker
-        team_id = "1W3B"
-        team_password = "pword"
-        clue_location = location
-        clue_prediction = decoded_word
-        message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
-        message = String(data=message_data)
-        detect.score_publisher.publish(message)
+
+        if location is not None:
+            team_id = "1W3B"
+            team_password = "pword"
+            clue_location = location
+            clue_prediction = decoded_word
+            message_data = f"{team_id},{team_password},{clue_location},{clue_prediction}"
+            message = String(data=message_data)
+            detect.score_publisher.publish(message)
 
 def order_points(pts):
     if len(pts.shape) >= 2 and pts.shape[1] == 2:
